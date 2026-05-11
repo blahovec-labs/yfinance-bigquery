@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+from io import StringIO
 from typing import Final
 
 import pandas as pd
+import requests
 
 log = logging.getLogger(__name__)
 
 WIKI_URL: Final[str] = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
+# Wikipedia requires a descriptive User-Agent for programmatic access; default
+# urllib UA is blocked with HTTP 403.
+_USER_AGENT: Final[str] = (
+    "yfinance-bigquery/0.1.0 "
+    "(https://github.com/blahovec-labs/yfinance-bigquery)"
+)
 
 _REQUIRED_COLS: Final[dict[str, str]] = {
     "Symbol": "symbol",
@@ -27,7 +36,9 @@ class WikipediaUniverseClient:
 
         Raises ValueError if Wikipedia's table 0 doesn't have expected columns.
         """
-        tables = pd.read_html(WIKI_URL)
+        resp = requests.get(WIKI_URL, headers={"User-Agent": _USER_AGENT}, timeout=30)
+        resp.raise_for_status()
+        tables = pd.read_html(StringIO(resp.text))
         if not tables:
             raise ValueError(f"no tables found at {WIKI_URL}")
         df: pd.DataFrame = tables[0]
