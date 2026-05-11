@@ -34,12 +34,12 @@ class TestSyncParser:
         ns = parser.parse_args([
             "sync",
             "--interval", "1d",
-            "--dataset", "p.ds.yfinance_v2_analytics",
+            "--dataset", "p.ds",
             "--symbols", "AAPL,MSFT",
         ])
         assert ns.command == "sync"
         assert ns.interval == "1d"
-        assert ns.dataset == "p.ds.yfinance_v2_analytics"
+        assert ns.dataset == "p.ds"
         assert ns.symbols == "AAPL,MSFT"
 
     def test_defaults(self):
@@ -47,7 +47,7 @@ class TestSyncParser:
         ns = parser.parse_args([
             "sync",
             "--interval", "all",
-            "--dataset", "p.ds.yfinance_v2_analytics",
+            "--dataset", "p.ds",
             "--symbols", "AAPL",
         ])
         assert ns.table_prefix == "ohlcv"
@@ -64,7 +64,7 @@ class TestSyncParser:
         ns = parser.parse_args([
             "sync",
             "--interval", "all",
-            "--dataset", "p.ds.yfinance_v2_analytics",
+            "--dataset", "p.ds",
             "--symbols", "AAPL",
         ])
         assert ns.interval == "all"
@@ -75,7 +75,7 @@ class TestSyncParser:
             parser.parse_args([
                 "sync",
                 "--interval", "2d",
-                "--dataset", "p.ds.yfinance_v2_analytics",
+                "--dataset", "p.ds",
                 "--symbols", "AAPL",
             ])
 
@@ -84,7 +84,7 @@ class TestSyncParser:
         ns = parser.parse_args([
             "sync",
             "--interval", "1d",
-            "--dataset", "p.ds.yfinance_v2_analytics",
+            "--dataset", "p.ds",
             "--symbols", "AAPL",
             "--runs-table", "p.ds.custom_runs",
         ])
@@ -95,7 +95,7 @@ class TestSyncParser:
         ns = parser.parse_args([
             "sync",
             "--interval", "1d",
-            "--dataset", "p.ds.yfinance_v2_analytics",
+            "--dataset", "p.ds",
             "--symbols", "AAPL",
             "--resume",
         ])
@@ -106,7 +106,7 @@ class TestSyncParser:
         ns = parser.parse_args([
             "sync",
             "--interval", "1d",
-            "--dataset", "p.ds.yfinance_v2_analytics",
+            "--dataset", "p.ds",
             "--symbols", "AAPL",
             "--dry-run",
         ])
@@ -364,7 +364,7 @@ class TestCmdSyncResume:
         ns = argparse.Namespace(
             command="sync",
             interval="1d",
-            dataset="p.ds.yfinance_v2_analytics",
+            dataset="p.ds",
             table_prefix="ohlcv",
             dim_symbols=None,
             symbols="AAPL",
@@ -402,7 +402,7 @@ class TestCmdSyncResume:
         ns = argparse.Namespace(
             command="sync",
             interval="1d",
-            dataset="p.ds.yfinance_v2_analytics",
+            dataset="p.ds",
             table_prefix="ohlcv",
             dim_symbols=None,
             symbols="AAPL",

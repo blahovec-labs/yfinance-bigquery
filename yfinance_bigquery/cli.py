@@ -249,10 +249,10 @@ def cmd_sync(ns: argparse.Namespace) -> int:
     else:
         intervals = [Interval.from_string(ns.interval)]
 
-    # Resolve dataset ref parts (project.dataset.yfinance_v2_analytics)
+    # Resolve dataset ref parts (project.dataset)
     dataset_parts = ns.dataset.split(".")
-    if len(dataset_parts) != 3:
-        log.error("--dataset must be project.dataset.table_prefix format, got %r", ns.dataset)
+    if len(dataset_parts) != 2:
+        log.error("--dataset must be project.dataset format, got %r", ns.dataset)
         return 2
     proj, ds = dataset_parts[0], dataset_parts[1]
 
