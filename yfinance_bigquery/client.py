@@ -151,8 +151,17 @@ class YFinanceClient:
         # 2. Stack ticker level → long form                                   #
         # ------------------------------------------------------------------ #
         # df.columns has levels [ticker, price-field].  stack(level=0) pivots
-        # the ticker level into rows; reset_index() promotes Date + Ticker to
-        # regular columns.
+        # the ticker level into rows; reset_index() promotes the time index
+        # (named "Date" or "Datetime") and Ticker to regular columns.
+        #
+        # Edge case: when some tickers in the batch error out, yfinance can
+        # return a DataFrame with `index.name = None`.  After reset_index(),
+        # the time column is then named "level_0" instead of the expected
+        # "Date"/"Datetime".  We force a known index name before stacking so
+        # the rename below always finds the time column.
+        if df.index.name is None:
+            df = df.copy()
+            df.index.name = "bar_start"
         long: pd.DataFrame = df.stack(level=0, future_stack=True).reset_index()
 
         # ------------------------------------------------------------------ #
@@ -165,7 +174,7 @@ class YFinanceClient:
             [str(c).lower().replace(" ", "_") for c in long.columns]
         )
         # 'adj close' → 'adj_close' (handled above); 'date'/'datetime' and
-        # 'ticker' need explicit renames.
+        # 'ticker' need explicit renames.  'bar_start' is already correct.
         long = long.rename(
             columns={
                 "date": "bar_start",

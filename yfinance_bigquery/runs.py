@@ -68,7 +68,7 @@ class RunsTable:
         recorded as success or empty. If the table doesn't exist yet, returns empty set."""
         try:
             sql = (
-                f"SELECT interval, chunk_start, chunk_end FROM `{ref}` "
+                f"SELECT `interval`, chunk_start, chunk_end FROM `{ref}` "
                 "WHERE status IN ('success', 'empty')"
             )
             rows = self.client.query_and_wait(sql).to_dataframe()
@@ -146,9 +146,11 @@ class RunsTable:
         status: str,
         rows_written: int,
     ) -> None:
+        # `interval` is a reserved word in BQ Standard SQL (used by DATE_SUB
+        # etc.); backtick-quote when used as a column name.
         sql = (
             f"INSERT INTO `{ref}` "
-            "(interval, chunk_start, chunk_end, chunk_kind, rows_written, status, "
+            "(`interval`, chunk_start, chunk_end, chunk_kind, rows_written, status, "
             "started_at, finished_at, library_version) "
             "VALUES (@interval, @chunk_start, @chunk_end, @chunk_kind, @rows_written, "
             "@status, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), @library_version)"
