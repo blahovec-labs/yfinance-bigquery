@@ -85,12 +85,15 @@ INTERNAL_AGG_SQL: Final[dict[str, str]] = {
         "WITH violations AS (\n"
         "  SELECT symbol,\n"
         "         COUNTIF(\n"
-        "           EXTRACT(HOUR FROM bar_start_et) < 9\n"
-        "           OR EXTRACT(HOUR FROM bar_start_et) > 16\n"
-        "           OR (EXTRACT(HOUR FROM bar_start_et) = 9\n"
-        "               AND EXTRACT(MINUTE FROM bar_start_et) < 15)\n"
-        "           OR (EXTRACT(HOUR FROM bar_start_et) = 16\n"
-        "               AND EXTRACT(MINUTE FROM bar_start_et) > 15)\n"
+        # bar_start_et is stored as TIMESTAMP (UTC internally); EXTRACT
+        # without a tz arg defaults to UTC. Use AT TIME ZONE so we actually
+        # check market-hour alignment in ET.
+        "           EXTRACT(HOUR FROM bar_start_et AT TIME ZONE 'America/New_York') < 9\n"
+        "           OR EXTRACT(HOUR FROM bar_start_et AT TIME ZONE 'America/New_York') > 16\n"
+        "           OR (EXTRACT(HOUR FROM bar_start_et AT TIME ZONE 'America/New_York') = 9\n"
+        "               AND EXTRACT(MINUTE FROM bar_start_et AT TIME ZONE 'America/New_York') < 15)\n"
+        "           OR (EXTRACT(HOUR FROM bar_start_et AT TIME ZONE 'America/New_York') = 16\n"
+        "               AND EXTRACT(MINUTE FROM bar_start_et AT TIME ZONE 'America/New_York') > 15)\n"
         "         ) AS bad,\n"
         "         COUNT(*) AS total\n"
         "  FROM `{table}`\n"
