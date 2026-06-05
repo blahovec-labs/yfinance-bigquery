@@ -191,3 +191,65 @@ def create_adjusted_view(*, client, source_table: str, view: str) -> None:
     client.query_and_wait(
         build_adjusted_view_ddl(source_table=source_table, view=view)
     )
+
+
+# ---------------------------------------------------------------------------
+# Intraday adjustment: borrow the DAILY factors
+# ---------------------------------------------------------------------------
+# yfinance does not report dividends/splits at sub-daily resolution, but it DOES
+# split-adjust the intraday close exactly like the daily series. A split/dividend
+# factor is constant within a trading day, so an intraday bar can borrow its day's
+# factor from the daily adjusted view (joined on symbol + trading_date) to get the
+# same close_raw + adj_close_tr as 1d — true cross-timeframe parity.
+
+
+def build_intraday_adjusted_sql(
+    *, intraday_table: str, daily_adjusted_view: str
+) -> str:
+    """SELECT applying the DAILY split/dividend factors to intraday bars.
+
+    Joins each intraday bar to its trading day's ``cum_split_factor`` /
+    ``cum_div_factor`` (from ``daily_adjusted_view``) and emits the same
+    ``close_raw`` (de-split) and ``adj_close_tr`` (total return) columns as the 1d
+    view. LEFT JOIN + COALESCE(..., 1.0) so a bar without a matching daily factor
+    is passed through unadjusted rather than dropped.
+    """
+    return (
+        "SELECT\n"
+        "  i.symbol, i.bar_start_utc, i.bar_start_et, i.trading_date,\n"
+        "  i.open, i.high, i.low, i.close, i.volume, i.interval,\n"
+        "  COALESCE(d.cum_split_factor, 1.0) AS cum_split_factor,\n"
+        "  SAFE_DIVIDE(i.close, COALESCE(d.cum_split_factor, 1.0)) AS close_raw,\n"
+        "  COALESCE(d.cum_div_factor, 1.0) AS cum_div_factor,\n"
+        "  i.close * COALESCE(d.cum_div_factor, 1.0) AS adj_close_tr\n"
+        f"FROM `{intraday_table}` i\n"
+        "LEFT JOIN (\n"
+        "  SELECT symbol, trading_date, cum_split_factor, cum_div_factor\n"
+        f"  FROM `{daily_adjusted_view}`\n"
+        ") d USING (symbol, trading_date)"
+    )
+
+
+def build_intraday_adjusted_view_ddl(
+    *, intraday_table: str, daily_adjusted_view: str, view: str
+) -> str:
+    """CREATE OR REPLACE VIEW DDL for an intraday adjusted view."""
+    return (
+        f"CREATE OR REPLACE VIEW `{view}` AS\n"
+        + build_intraday_adjusted_sql(
+            intraday_table=intraday_table, daily_adjusted_view=daily_adjusted_view
+        )
+    )
+
+
+def create_intraday_adjusted_view(
+    *, client, intraday_table: str, daily_adjusted_view: str, view: str
+) -> None:
+    """Create/replace an intraday adjusted VIEW in BigQuery (borrows daily factors)."""
+    client.query_and_wait(
+        build_intraday_adjusted_view_ddl(
+            intraday_table=intraday_table,
+            daily_adjusted_view=daily_adjusted_view,
+            view=view,
+        )
+    )

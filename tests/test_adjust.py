@@ -197,3 +197,40 @@ def test_create_adjusted_view_runs_ddl():
     assert client.query_and_wait.called
     ran_sql = client.query_and_wait.call_args[0][0]
     assert "CREATE OR REPLACE VIEW" in ran_sql
+
+
+# ---------------------------------------------------------------------------
+# Intraday adjusted view: apply DAILY factors (intraday has no native events)
+# ---------------------------------------------------------------------------
+
+
+def test_build_intraday_adjusted_sql_joins_daily_factors():
+    from yfinance_bigquery.adjust import build_intraday_adjusted_sql
+
+    sql = build_intraday_adjusted_sql(
+        intraday_table="p.d.ohlcv_60m",
+        daily_adjusted_view="p.d.ohlcv_1d_adjusted",
+    )
+    assert "p.d.ohlcv_60m" in sql
+    assert "p.d.ohlcv_1d_adjusted" in sql
+    # join the daily factors by (symbol, trading_date) — constant within a day
+    assert "USING (symbol, trading_date)" in sql
+    # same de-split + total-return outputs as 1d, applied from the daily factors
+    assert "SAFE_DIVIDE(i.close, COALESCE(d.cum_split_factor, 1.0)) AS close_raw" in sql
+    assert "i.close * COALESCE(d.cum_div_factor, 1.0) AS adj_close_tr" in sql
+
+
+def test_create_intraday_adjusted_view_runs_ddl():
+    from unittest.mock import MagicMock
+
+    from yfinance_bigquery.adjust import create_intraday_adjusted_view
+
+    client = MagicMock()
+    create_intraday_adjusted_view(
+        client=client,
+        intraday_table="p.d.ohlcv_60m",
+        daily_adjusted_view="p.d.ohlcv_1d_adjusted",
+        view="p.d.ohlcv_60m_adjusted",
+    )
+    ran_sql = client.query_and_wait.call_args[0][0]
+    assert ran_sql.startswith("CREATE OR REPLACE VIEW `p.d.ohlcv_60m_adjusted` AS")
