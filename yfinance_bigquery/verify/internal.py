@@ -105,6 +105,33 @@ INTERNAL_AGG_SQL: Final[dict[str, str]] = {
         "       total AS sample_size\n"
         "FROM violations"
     ),
+    # Corporate-action continuity: on every RECORDED split date (stock_splits > 0)
+    # the split-adjusted `close` must stay CONTINUOUS — the 1-day move should be the
+    # real (small) move, NOT the split magnitude. A leaked/un-adjusted split shows
+    # the full jump (2:1=-50%, 4:1=-75%, 10:1=-90%), so a >25% move ON a split bar
+    # means the adjustment failed. Gating on stock_splits>0 is deliberate: it
+    # verifies our handling of known corporate actions without false-flagging
+    # legitimate crashes (e.g. GL -53% on 2024-04-11, which is not a split).
+    "corporate_action_continuity": (
+        "WITH rets AS (\n"
+        "  SELECT symbol, close, stock_splits,\n"
+        "         LAG(close) OVER (PARTITION BY symbol ORDER BY trading_date) AS prev_close\n"
+        "  FROM `{table}`\n"
+        "  WHERE EXTRACT(YEAR FROM trading_date) = @season\n"
+        "),\n"
+        "violations AS (\n"
+        "  SELECT symbol,\n"
+        "         COUNTIF(stock_splits > 0 AND prev_close > 0\n"
+        "                 AND ABS(SAFE_DIVIDE(close, prev_close) - 1) > 0.25) AS bad,\n"
+        "         COUNT(*) AS total\n"
+        "  FROM rets\n"
+        "  GROUP BY symbol\n"
+        ")\n"
+        "SELECT symbol AS id,\n"
+        "       SAFE_DIVIDE(bad, total) AS value,\n"
+        "       total AS sample_size\n"
+        "FROM violations"
+    ),
     # Window-function approach: any bar sharing (symbol, bar_start_utc) with another
     # counts as a duplicate.
     "no_duplicate_bars": (
@@ -160,6 +187,7 @@ class InternalConsistencyVerifier:
         "no_future_bars",
         "trading_day_alignment",
         "no_duplicate_bars",
+        "corporate_action_continuity",
     ])
 
     def __init__(

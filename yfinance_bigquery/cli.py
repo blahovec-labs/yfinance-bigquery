@@ -21,6 +21,7 @@ from yfinance_bigquery.docs.renderers import (
 )
 from yfinance_bigquery.intervals import INTERVAL_CONFIG, Interval
 from yfinance_bigquery.verify.internal import InternalConsistencyVerifier
+from yfinance_bigquery.verify.membership import MembershipVerifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 log = logging.getLogger("yfinance-bigquery")
@@ -33,6 +34,7 @@ ALL_INTERVALS: list[Interval] = [
     Interval.M1,
 ]
 ALL_METRICS: list[str] = sorted(InternalConsistencyVerifier.SUPPORTED_METRICS)
+ALL_MEMBERSHIP_METRICS: list[str] = sorted(MembershipVerifier.SUPPORTED_METRICS)
 DOC_FORMATS: list[str] = ["bq-apply", "llm", "dictionary", "markdown", "dbt"]
 
 
@@ -182,6 +184,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_v.add_argument("--threshold", type=float, default=1.00,
         help="Pass threshold (default 1.00 — zero tolerance for internal checks).")
+
+    # ---------------------------------------------------------------------- #
+    # verify-membership
+    # ---------------------------------------------------------------------- #
+    p_vm = sub.add_parser(
+        "verify-membership",
+        help="Run integrity checks on the sp500_membership spell table",
+    )
+    p_vm.add_argument("--membership-table", required=True,
+                      help="project.dataset.sp500_membership")
+    p_vm.add_argument(
+        "--metric",
+        required=True,
+        choices=[*ALL_MEMBERSHIP_METRICS, "all"],
+        help="Membership check to run; 'all' runs every check.",
+    )
+    p_vm.add_argument("--threshold", type=float, default=1.00,
+        help="Pass threshold (default 1.00 — zero tolerance).")
 
     # ---------------------------------------------------------------------- #
     # docs
@@ -468,6 +488,28 @@ def cmd_verify(ns: argparse.Namespace) -> int:
     return 0 if overall_pass else 1
 
 
+def cmd_verify_membership(ns: argparse.Namespace) -> int:
+    client = bigquery.Client()
+    metrics = ALL_MEMBERSHIP_METRICS if ns.metric == "all" else [ns.metric]
+
+    overall_pass = True
+    for metric in metrics:
+        result = MembershipVerifier(
+            client=client, table=ns.membership_table, metric=metric
+        ).run()
+        passed = result.passed(ns.threshold)
+        verdict = "PASS" if passed else "FAIL"
+        print(
+            f"{metric}"
+            f" / compared={result.total_compared}"
+            f" / within_tolerance={result.within_tolerance_count}"
+            f" / {verdict}"
+        )
+        if not passed:
+            overall_pass = False
+    return 0 if overall_pass else 1
+
+
 # ---------------------------------------------------------------------------
 # cmd_docs
 # ---------------------------------------------------------------------------
@@ -539,6 +581,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_universe(ns)
     if ns.command == "verify":
         return cmd_verify(ns)
+    if ns.command == "verify-membership":
+        return cmd_verify_membership(ns)
     if ns.command == "docs":
         return cmd_docs(ns)
     raise AssertionError(f"unhandled command {ns.command!r}")

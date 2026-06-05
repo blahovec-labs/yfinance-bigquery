@@ -15,24 +15,35 @@ from yfinance_bigquery.verify.internal import INTERNAL_AGG_SQL, InternalConsiste
 
 
 def test_supported_metrics_user_facing() -> None:
-    """SUPPORTED_METRICS must expose exactly 5 user-facing names."""
-    assert len(InternalConsistencyVerifier.SUPPORTED_METRICS) == 5
+    """SUPPORTED_METRICS must expose exactly 6 user-facing names."""
+    assert len(InternalConsistencyVerifier.SUPPORTED_METRICS) == 6
     assert InternalConsistencyVerifier.SUPPORTED_METRICS == frozenset([
         "ohlc_monotonic",
         "volume_non_negative",
         "no_future_bars",
         "trading_day_alignment",
         "no_duplicate_bars",
+        "corporate_action_continuity",
     ])
 
 
-def test_internal_agg_sql_has_6_entries() -> None:
-    """INTERNAL_AGG_SQL must have 6 entries (trading_day_alignment split into 2 variants)."""
-    assert len(INTERNAL_AGG_SQL) == 6
+def test_internal_agg_sql_has_7_entries() -> None:
+    """INTERNAL_AGG_SQL must have 7 entries (trading_day_alignment split into 2 variants)."""
+    assert len(INTERNAL_AGG_SQL) == 7
     assert "trading_day_alignment_1d" in INTERNAL_AGG_SQL
     assert "trading_day_alignment_intraday" in INTERNAL_AGG_SQL
     # The user-facing name must NOT appear as a SQL key
     assert "trading_day_alignment" not in INTERNAL_AGG_SQL
+
+
+def test_sql_template_corporate_action_continuity_flags_leaked_splits() -> None:
+    """continuity SQL flags a large residual move ON a recorded split bar (a leaked
+    split), gating on stock_splits>0 so legit crashes are not false-flagged."""
+    sql = INTERNAL_AGG_SQL["corporate_action_continuity"]
+    assert "LAG(close)" in sql
+    assert "stock_splits > 0" in sql
+    assert "> 0.25" in sql
+    assert "SAFE_DIVIDE(close, prev_close)" in sql
 
 
 def test_sql_template_ohlc_monotonic_has_check() -> None:
