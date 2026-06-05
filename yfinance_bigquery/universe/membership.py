@@ -37,6 +37,12 @@ def reconstruct_membership(
         current member is recovered as a CLOSED spell, with ``date_removed`` set
         to the change date and ``date_added`` to the matching prior addition date
         if one is present in ``changes`` (else ``None``).
+
+    Known limitation (Phase 1): a symbol with MULTIPLE membership spells inside
+    the window (removed, re-added, then removed again) is recorded as a single
+    closed spell — full multi-spell reconstruction is a documented follow-up.
+    Such cases are rare (a handful of tickers historically) and effectively
+    absent from the ~2019+ window in practice.
     """
     current_symbols = {str(s) for s in current["symbol"]}
 
@@ -92,7 +98,9 @@ def members_as_of_sql(*, table: str) -> str:
     return (
         f"SELECT DISTINCT symbol\n"
         f"FROM `{table}`\n"
-        f"WHERE date_added <= @as_of\n"
+        # NULL date_added = member since before the reconstruction window — must
+        # NOT be excluded, or pre-window members vanish (survivorship bias).
+        f"WHERE (date_added IS NULL OR date_added <= @as_of)\n"
         f"  AND (date_removed IS NULL OR date_removed > @as_of)"
     )
 

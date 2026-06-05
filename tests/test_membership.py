@@ -58,7 +58,8 @@ def test_reconstruct_recovers_added_date_for_removed_symbol():
 
 def test_members_as_of_sql_has_pit_predicate():
     sql = members_as_of_sql(table="p.d.sp500_membership")
-    assert "date_added <= @as_of" in sql
+    # NULL date_added (pre-window members) must NOT be excluded.
+    assert "date_added IS NULL OR date_added <= @as_of" in sql
     assert "date_removed IS NULL OR date_removed > @as_of" in sql
     assert "p.d.sp500_membership" in sql
 

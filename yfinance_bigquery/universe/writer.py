@@ -158,6 +158,9 @@ class MembershipWriter:
 
     def replace(self, *, ref: DimSymbolsTableRef, membership: pd.DataFrame) -> int:
         """Full-replace the membership table. Returns rows written."""
+        if len(membership) == 0:
+            log.warning("empty membership DataFrame; skipping replace")
+            return 0
         self.create_table_if_missing(ref)
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
