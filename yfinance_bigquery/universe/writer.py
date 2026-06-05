@@ -9,7 +9,7 @@ import pandas as pd
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 
-from yfinance_bigquery.schema import DIM_SYMBOLS_SCHEMA
+from yfinance_bigquery.schema import DIM_SYMBOLS_SCHEMA, SP500_MEMBERSHIP_SCHEMA
 
 log = logging.getLogger(__name__)
 
@@ -125,3 +125,50 @@ def _sql_date(v: object) -> str:
     if _is_na(v):
         return "NULL"
     return f"DATE '{v}'"
+
+
+class MembershipWriter:
+    """Write the point-in-time membership table via full truncate+load.
+
+    Membership is a complete reconstruction on every run (not an incremental
+    upsert), so a write-truncate load is correct — no MERGE.
+    """
+
+    def __init__(self, client: bigquery.Client) -> None:
+        self.client = client
+
+    def create_table_if_missing(self, ref: DimSymbolsTableRef) -> None:
+        try:
+            self.client.get_table(str(ref))
+            return
+        except NotFound:
+            pass
+        bq_schema = [
+            bigquery.SchemaField(c.name, c.type, mode=c.mode,
+                                 description=c.short_description)
+            for c in SP500_MEMBERSHIP_SCHEMA
+        ]
+        table = bigquery.Table(str(ref), schema=bq_schema)
+        table.description = (
+            "Point-in-time S&P 500 membership spells (survivorship-bias-free), "
+            "reconstructed from Wikipedia by yfinance-bigquery."
+        )
+        self.client.create_table(table)
+        log.info("created table %s", ref)
+
+    def replace(self, *, ref: DimSymbolsTableRef, membership: pd.DataFrame) -> int:
+        """Full-replace the membership table. Returns rows written."""
+        self.create_table_if_missing(ref)
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            schema=[
+                bigquery.SchemaField(c.name, c.type, mode=c.mode)
+                for c in SP500_MEMBERSHIP_SCHEMA
+            ],
+        )
+        job = self.client.load_table_from_dataframe(
+            membership, str(ref), job_config=job_config
+        )
+        job.result()
+        log.info("wrote %d membership rows to %s", len(membership), ref)
+        return len(membership)
