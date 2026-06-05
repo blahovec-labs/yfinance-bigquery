@@ -14,7 +14,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from yfinance_bigquery.adjust import compute_split_factor
+from yfinance_bigquery.adjust import compute_split_factor, compute_total_return_factor
 
 
 def _bars(rows: list[tuple[str, date, float, float]]) -> pd.DataFrame:
@@ -111,6 +111,45 @@ def test_reverse_split_recovers_lower_raw_price():
 
 
 # ---------------------------------------------------------------------------
+# Dividend total-return factor (adj_close_tr)
+# ---------------------------------------------------------------------------
+
+
+def _div_bars(rows: list[tuple[str, date, float, float]]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["symbol", "trading_date", "close", "dividends"])
+
+
+def test_dividend_total_return_factor():
+    """A $2 dividend (ex-date day 4, prior close 100) scales every PRIOR bar down
+    by (1 - 2/100) = 0.98; the ex-date and later bars are unaffected by it. This
+    is the reproducible replacement for yfinance's drifting adj_close."""
+    bars = _div_bars([
+        ("KO", date(2024, 1, 2), 100.0, 0.0),
+        ("KO", date(2024, 1, 3), 100.0, 0.0),
+        ("KO", date(2024, 1, 4), 100.0, 2.0),   # ex-dividend; prev_close = 100
+        ("KO", date(2024, 1, 5), 101.0, 0.0),
+    ])
+    out = compute_total_return_factor(bars).set_index("trading_date")
+    assert out.loc[date(2024, 1, 2), "cum_div_factor"] == pytest.approx(0.98)
+    assert out.loc[date(2024, 1, 3), "cum_div_factor"] == pytest.approx(0.98)
+    # the ex-date's OWN dividend does not further reduce its bar (strictly-future).
+    assert out.loc[date(2024, 1, 4), "cum_div_factor"] == pytest.approx(1.0)
+    assert out.loc[date(2024, 1, 2), "adj_close_tr"] == pytest.approx(98.0)
+    # latest bar = actual close (no future dividends): the TR series anchors at par.
+    assert out.loc[date(2024, 1, 5), "adj_close_tr"] == pytest.approx(101.0)
+
+
+def test_no_dividend_total_return_is_identity():
+    bars = _div_bars([
+        ("MSFT", date(2024, 1, 2), 370.0, 0.0),
+        ("MSFT", date(2024, 1, 3), 372.0, 0.0),
+    ])
+    out = compute_total_return_factor(bars)
+    assert (out["cum_div_factor"] == 1.0).all()
+    assert (out["adj_close_tr"] == out["close"]).all()
+
+
+# ---------------------------------------------------------------------------
 # BQ-native plumbing (build_adjustment_factor_sql / view / writer)
 # ---------------------------------------------------------------------------
 
@@ -119,7 +158,7 @@ def test_build_adjustment_factor_sql_uses_future_window_product():
     from yfinance_bigquery.adjust import build_adjustment_factor_sql
 
     sql = build_adjustment_factor_sql(source_table="p.d.ohlcv_1d")
-    # Product of STRICTLY-FUTURE split multipliers (current bar excluded).
+    # Product of STRICTLY-FUTURE multipliers (current bar excluded).
     assert "ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING" in sql
     # BigQuery has no PRODUCT aggregate -> EXP(SUM(LN(...))).
     assert "EXP(SUM(LN(" in sql
@@ -128,6 +167,12 @@ def test_build_adjustment_factor_sql_uses_future_window_product():
     # De-split is DIVISION (close / factor), not multiplication.
     assert "SAFE_DIVIDE(close, cum_split_factor)" in sql
     assert "close_raw" in sql and "cum_split_factor" in sql
+    # Dividend total-return: reinvestment ratio vs the PRIOR close (LAG), folded
+    # into a strictly-future product, then applied to the split-adjusted close.
+    assert "LAG(close)" in sql
+    assert "1.0 - dividends / _prev_close" in sql
+    assert "cum_div_factor" in sql
+    assert "close * cum_div_factor AS adj_close_tr" in sql
 
 
 def test_build_adjusted_view_ddl_wraps_select():
