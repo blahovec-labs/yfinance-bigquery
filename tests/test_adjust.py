@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date
 
 import pandas as pd
+import pytest
 
 from yfinance_bigquery.adjust import compute_split_factor
 
@@ -72,6 +73,28 @@ def test_current_split_bar_factor_is_one():
     out = compute_split_factor(bars).set_index("trading_date")
     assert out.loc[date(2020, 8, 31), "cum_split_factor"] == 1.0
     assert out.loc[date(2020, 8, 28), "cum_split_factor"] == 0.25
+
+
+def test_two_splits_compound_correctly():
+    """Two splits (4:1 then 10:1): before both, factor = 1/40; between them, 1/10.
+    close_raw recovers the actual traded price at each point (the compounding the
+    single-split tests can't exercise)."""
+    bars = _bars([
+        ("NVDA", date(2021, 7, 19), 200.0, 0.0),    # before both; raw 200/0.025 = 8000
+        ("NVDA", date(2021, 7, 20), 200.0, 4.0),    # 4:1 date; raw 200/0.1 = 2000
+        ("NVDA", date(2024, 6, 9), 1200.0, 0.0),    # between; raw 1200/0.1 = 12000
+        ("NVDA", date(2024, 6, 10), 120.0, 10.0),   # 10:1 date; own split excluded
+        ("NVDA", date(2024, 6, 11), 125.0, 0.0),    # after both
+    ])
+    out = compute_split_factor(bars).set_index("trading_date")
+    assert out.loc[date(2021, 7, 19), "cum_split_factor"] == pytest.approx(0.025)  # 1/40
+    assert out.loc[date(2021, 7, 20), "cum_split_factor"] == pytest.approx(0.1)    # 1/10
+    assert out.loc[date(2024, 6, 9), "cum_split_factor"] == pytest.approx(0.1)     # 1/10
+    assert out.loc[date(2024, 6, 10), "cum_split_factor"] == pytest.approx(1.0)
+    assert out.loc[date(2024, 6, 11), "cum_split_factor"] == pytest.approx(1.0)
+    # close_raw recovers the actual pre-split prices through both events.
+    assert out.loc[date(2021, 7, 19), "close_raw"] == pytest.approx(8000.0)
+    assert out.loc[date(2024, 6, 9), "close_raw"] == pytest.approx(12000.0)
 
 
 def test_reverse_split_recovers_lower_raw_price():

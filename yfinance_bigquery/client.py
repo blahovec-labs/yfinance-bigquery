@@ -213,10 +213,15 @@ class YFinanceClient:
         # ------------------------------------------------------------------ #
         # With actions=True, the 1d download returns Dividends + Stock Splits
         # (and Adj Close); they flow through the stack above. Intraday intervals
-        # omit them, so any column still absent here is back-filled with None.
-        for col in ("adj_close", "dividends", "stock_splits"):
+        # omit them. adj_close is NULL for intraday (yfinance pre-adjusts in
+        # place); dividends/stock_splits are back-filled with 0.0 — corporate
+        # actions are daily events, so "no event in this bar" is 0.0, matching the
+        # schema contract that `stock_splits != 0` finds split dates.
+        if "adj_close" not in long.columns:
+            long["adj_close"] = None
+        for col in ("dividends", "stock_splits"):
             if col not in long.columns:
-                long[col] = None
+                long[col] = 0.0
 
         # ------------------------------------------------------------------ #
         # 7. Drop the staging column and reorder to match OHLCV_SCHEMA        #
