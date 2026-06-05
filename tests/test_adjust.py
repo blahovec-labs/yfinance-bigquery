@@ -1,4 +1,11 @@
-"""Tests for the deterministic split-adjustment factor."""
+"""Tests for the deterministic split factor + raw-price recovery.
+
+Empirical finding (2026-06-04): yfinance's ``close`` (auto_adjust=False) is
+ALREADY split-adjusted — a 4:1 split shows a continuous price series, not a raw
+one. So the job is NOT to re-split ``close`` (that would double-adjust); it is to
+recover the immutable RAW (de-split) price as a drift-free anchor, and to expose
+the split factor. The split-adjusted return series is ``close`` itself.
+"""
 
 from __future__ import annotations
 
@@ -6,33 +13,31 @@ from datetime import date
 
 import pandas as pd
 
-from yfinance_bigquery.adjust import compute_split_adjustment
+from yfinance_bigquery.adjust import compute_split_factor
 
 
 def _bars(rows: list[tuple[str, date, float, float]]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["symbol", "trading_date", "close", "stock_splits"])
 
 
-def test_split_makes_adjusted_return_continuous():
-    """A 4:1 split: raw close drops 400 -> 100 (spurious -75%). The adjusted
-    series must be CONTINUOUS across the split (adjusted return ~ 0)."""
+def test_close_raw_recovers_actual_pre_split_price():
+    """A 4:1 split. yfinance ``close`` is already split-adjusted (continuous at
+    ~100), so close_raw must recover the ACTUAL pre-split traded price (~400)."""
     bars = _bars([
-        ("AAPL", date(2020, 8, 28), 400.0, 0.0),   # day before split
-        ("AAPL", date(2020, 8, 31), 100.0, 4.0),   # 4:1 split effective
+        ("AAPL", date(2020, 8, 28), 100.0, 0.0),   # yfinance-adjusted (raw was 400)
+        ("AAPL", date(2020, 8, 31), 100.0, 4.0),   # 4:1 split effective (raw 100)
         ("AAPL", date(2020, 9, 1), 105.0, 0.0),    # day after
     ])
-    out = compute_split_adjustment(bars).set_index("trading_date")
+    out = compute_split_factor(bars).set_index("trading_date")
 
-    # pre-split bar is scaled down by 1/4 so it lines up with post-split level
-    assert out.loc[date(2020, 8, 28), "adj_close"] == 100.0
-    assert out.loc[date(2020, 8, 31), "adj_close"] == 100.0
-    # adjusted return across the split is ~0 (the spurious -75% is gone)
-    adj = out["adj_close"]
+    # The pre-split bar is divided by its 0.25 factor -> recovers the real $400.
+    assert out.loc[date(2020, 8, 28), "close_raw"] == 400.0
+    assert out.loc[date(2020, 8, 31), "close_raw"] == 100.0
+    assert out.loc[date(2020, 9, 1), "close_raw"] == 105.0
+    # close itself is the split-CONTINUOUS return series: ~0% across the split.
+    adj = out["close"]
     ret_across = adj.loc[date(2020, 8, 31)] / adj.loc[date(2020, 8, 28)] - 1.0
     assert abs(ret_across) < 1e-9
-    # post-split real move survives: +5%
-    ret_after = adj.loc[date(2020, 9, 1)] / adj.loc[date(2020, 8, 31)] - 1.0
-    assert abs(ret_after - 0.05) < 1e-9
 
 
 def test_no_split_is_identity():
@@ -40,32 +45,46 @@ def test_no_split_is_identity():
         ("MSFT", date(2024, 1, 2), 370.0, 0.0),
         ("MSFT", date(2024, 1, 3), 372.0, 0.0),
     ])
-    out = compute_split_adjustment(bars)
+    out = compute_split_factor(bars)
     assert (out["cum_split_factor"] == 1.0).all()
-    assert (out["adj_close"] == out["close"]).all()
+    assert (out["close_raw"] == out["close"]).all()
 
 
 def test_factor_is_deterministic_across_runs():
-    """Stability: the factor depends only on raw close + stock_splits, never on
-    yfinance's re-adjusted adj_close or run time — two runs must be identical."""
+    """Stability: the factor + raw price depend only on close + stock_splits,
+    never on run time — two runs must be identical."""
     bars = _bars([
-        ("AAPL", date(2020, 8, 28), 400.0, 0.0),
+        ("AAPL", date(2020, 8, 28), 100.0, 0.0),
         ("AAPL", date(2020, 8, 31), 100.0, 4.0),
     ])
-    a = compute_split_adjustment(bars)["adj_close"].tolist()
-    b = compute_split_adjustment(bars)["adj_close"].tolist()
+    a = compute_split_factor(bars)["close_raw"].tolist()
+    b = compute_split_factor(bars)["close_raw"].tolist()
     assert a == b
 
 
-def test_current_split_bar_not_double_counted():
-    """The split bar's OWN ratio is already in its raw price; its factor is 1."""
+def test_current_split_bar_factor_is_one():
+    """The split bar's OWN close is already post-split; its factor is 1. The
+    bar BEFORE a 4:1 split carries 0.25 (one strictly-future split)."""
     bars = _bars([
-        ("AAPL", date(2020, 8, 28), 400.0, 0.0),
+        ("AAPL", date(2020, 8, 28), 100.0, 0.0),
         ("AAPL", date(2020, 8, 31), 100.0, 4.0),
     ])
-    out = compute_split_adjustment(bars).set_index("trading_date")
+    out = compute_split_factor(bars).set_index("trading_date")
     assert out.loc[date(2020, 8, 31), "cum_split_factor"] == 1.0
     assert out.loc[date(2020, 8, 28), "cum_split_factor"] == 0.25
+
+
+def test_reverse_split_recovers_lower_raw_price():
+    """A 1-for-2 reverse split (yfinance ratio 0.5) doubles the price. yfinance
+    adjusts the pre-split close UP to ~100; close_raw must recover the real ~50."""
+    bars = _bars([
+        ("XYZ", date(2023, 1, 2), 100.0, 0.0),   # yfinance-adjusted (raw was 50)
+        ("XYZ", date(2023, 1, 3), 100.0, 0.5),   # 1-for-2 reverse effective
+    ])
+    out = compute_split_factor(bars).set_index("trading_date")
+    # 1/0.5 = 2.0 future multiplier -> pre-split factor 2.0 -> raw = 100/2 = 50.
+    assert out.loc[date(2023, 1, 2), "cum_split_factor"] == 2.0
+    assert out.loc[date(2023, 1, 2), "close_raw"] == 50.0
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +102,9 @@ def test_build_adjustment_factor_sql_uses_future_window_product():
     assert "EXP(SUM(LN(" in sql
     assert "1.0 / stock_splits" in sql
     assert "p.d.ohlcv_1d" in sql
-    assert "adj_close" in sql and "cum_split_factor" in sql
+    # De-split is DIVISION (close / factor), not multiplication.
+    assert "SAFE_DIVIDE(close, cum_split_factor)" in sql
+    assert "close_raw" in sql and "cum_split_factor" in sql
 
 
 def test_build_adjusted_view_ddl_wraps_select():
