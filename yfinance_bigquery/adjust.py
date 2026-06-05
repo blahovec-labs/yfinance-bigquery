@@ -60,3 +60,52 @@ def _future_product(multipliers: pd.Series) -> pd.Series:
     """
     including_current = multipliers[::-1].cumprod()[::-1]
     return including_current.shift(-1).fillna(1.0)
+
+
+def build_adjustment_factor_sql(*, source_table: str) -> str:
+    """SELECT producing split-adjusted daily bars from a raw OHLCV table.
+
+    ``cum_split_factor`` = product of ``1/ratio`` over all STRICTLY-FUTURE split
+    events (``trading_date`` > the bar), computed as ``EXP(SUM(LN(m)))`` over a
+    FOLLOWING window because BigQuery has no PRODUCT aggregate. ``adj_close`` =
+    ``close * cum_split_factor``. Mirrors ``compute_split_adjustment`` (the pandas
+    reference) and is deterministic from raw ``close`` + ``stock_splits`` only,
+    independent of yfinance's drifting ``adj_close``. Dividend total-return
+    adjustment is a documented follow-up.
+    """
+    return (
+        "WITH mult AS (\n"
+        "  SELECT\n"
+        "    symbol, trading_date, open, high, low, close, volume,\n"
+        "    IF(stock_splits > 0, 1.0 / stock_splits, 1.0) AS _m\n"
+        f"  FROM `{source_table}`\n"
+        ")\n"
+        "SELECT\n"
+        "  symbol, trading_date, open, high, low, close, volume,\n"
+        "  COALESCE(EXP(SUM(LN(_m)) OVER w), 1.0) AS cum_split_factor,\n"
+        "  close * COALESCE(EXP(SUM(LN(_m)) OVER w), 1.0) AS adj_close\n"
+        "FROM mult\n"
+        "WINDOW w AS (\n"
+        "  PARTITION BY symbol ORDER BY trading_date\n"
+        "  ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING\n"
+        ")"
+    )
+
+
+def build_adjusted_view_ddl(*, source_table: str, view: str) -> str:
+    """CREATE OR REPLACE VIEW DDL for the split-adjusted daily view."""
+    return (
+        f"CREATE OR REPLACE VIEW `{view}` AS\n"
+        + build_adjustment_factor_sql(source_table=source_table)
+    )
+
+
+def create_adjusted_view(*, client, source_table: str, view: str) -> None:
+    """Create/replace the split-adjusted daily VIEW in BigQuery.
+
+    ``client`` is a ``google.cloud.bigquery.Client`` (duck-typed: needs
+    ``query_and_wait``).
+    """
+    client.query_and_wait(
+        build_adjusted_view_ddl(source_table=source_table, view=view)
+    )

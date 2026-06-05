@@ -66,3 +66,45 @@ def test_current_split_bar_not_double_counted():
     out = compute_split_adjustment(bars).set_index("trading_date")
     assert out.loc[date(2020, 8, 31), "cum_split_factor"] == 1.0
     assert out.loc[date(2020, 8, 28), "cum_split_factor"] == 0.25
+
+
+# ---------------------------------------------------------------------------
+# BQ-native plumbing (build_adjustment_factor_sql / view / writer)
+# ---------------------------------------------------------------------------
+
+
+def test_build_adjustment_factor_sql_uses_future_window_product():
+    from yfinance_bigquery.adjust import build_adjustment_factor_sql
+
+    sql = build_adjustment_factor_sql(source_table="p.d.ohlcv_1d")
+    # Product of STRICTLY-FUTURE split multipliers (current bar excluded).
+    assert "ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING" in sql
+    # BigQuery has no PRODUCT aggregate -> EXP(SUM(LN(...))).
+    assert "EXP(SUM(LN(" in sql
+    assert "1.0 / stock_splits" in sql
+    assert "p.d.ohlcv_1d" in sql
+    assert "adj_close" in sql and "cum_split_factor" in sql
+
+
+def test_build_adjusted_view_ddl_wraps_select():
+    from yfinance_bigquery.adjust import build_adjusted_view_ddl
+
+    ddl = build_adjusted_view_ddl(
+        source_table="p.d.ohlcv_1d", view="p.d.ohlcv_1d_adjusted"
+    )
+    assert ddl.startswith("CREATE OR REPLACE VIEW `p.d.ohlcv_1d_adjusted` AS")
+    assert "EXP(SUM(LN(" in ddl
+
+
+def test_create_adjusted_view_runs_ddl():
+    from unittest.mock import MagicMock
+
+    from yfinance_bigquery.adjust import create_adjusted_view
+
+    client = MagicMock()
+    create_adjusted_view(
+        client=client, source_table="p.d.ohlcv_1d", view="p.d.ohlcv_1d_adjusted"
+    )
+    assert client.query_and_wait.called
+    ran_sql = client.query_and_wait.call_args[0][0]
+    assert "CREATE OR REPLACE VIEW" in ran_sql
