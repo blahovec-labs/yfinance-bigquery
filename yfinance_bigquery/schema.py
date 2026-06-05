@@ -186,12 +186,13 @@ OHLCV_SCHEMA: list[ColumnSpec] = [
         name="open",
         type="FLOAT64",
         mode="NULLABLE",
-        short_description="Opening price of the bar (unadjusted).",
+        short_description="Opening price of the bar (yfinance split-adjusted).",
         business_definition=(
             "First traded price during the bar window, in USD, as reported by Yahoo "
-            "Finance without split or dividend adjustment. For the 1d interval this is "
-            "the official NYSE/NASDAQ opening auction price; for intraday intervals it "
-            "is the first transaction price within the bar."
+            "Finance with Yahoo's split adjustment applied but without dividend "
+            "adjustment (see the close column for the full adjustment caveat). For the "
+            "1d interval this is the official NYSE/NASDAQ opening auction price; for "
+            "intraday intervals it is the first transaction price within the bar."
         ),
         semantic_tags=["price", "ohlc"],
         valid_range=(0.0, 1_000_000.0),
@@ -209,12 +210,13 @@ OHLCV_SCHEMA: list[ColumnSpec] = [
         name="high",
         type="FLOAT64",
         mode="NULLABLE",
-        short_description="Highest price traded during the bar (unadjusted).",
+        short_description="Highest price traded during the bar (yfinance split-adjusted).",
         business_definition=(
             "Maximum transaction price recorded within the bar window, in USD, as "
-            "reported by Yahoo Finance without adjustment. For intraday bars this "
-            "reflects the intrabar high from consolidated tape data. Always satisfies "
-            "high >= open, high >= close, and high >= low when all four are non-NULL."
+            "reported by Yahoo Finance, split-adjusted but not dividend-adjusted (see "
+            "the close column for the full caveat). For intraday bars this reflects the "
+            "intrabar high from consolidated tape data. Always satisfies high >= open, "
+            "high >= close, and high >= low when all four are non-NULL."
         ),
         semantic_tags=["price", "ohlc"],
         valid_range=(0.0, 1_000_000.0),
@@ -232,12 +234,13 @@ OHLCV_SCHEMA: list[ColumnSpec] = [
         name="low",
         type="FLOAT64",
         mode="NULLABLE",
-        short_description="Lowest price traded during the bar (unadjusted).",
+        short_description="Lowest price traded during the bar (yfinance split-adjusted).",
         business_definition=(
             "Minimum transaction price recorded within the bar window, in USD, as "
-            "reported by Yahoo Finance without adjustment. For intraday bars this "
-            "reflects the intrabar low from consolidated tape data. Always satisfies "
-            "low <= open, low <= close, and low <= high when all four are non-NULL."
+            "reported by Yahoo Finance, split-adjusted but not dividend-adjusted (see "
+            "the close column for the full caveat). For intraday bars this reflects the "
+            "intrabar low from consolidated tape data. Always satisfies low <= open, "
+            "low <= close, and low <= high when all four are non-NULL."
         ),
         semantic_tags=["price", "ohlc"],
         valid_range=(0.0, 1_000_000.0),
@@ -256,22 +259,25 @@ OHLCV_SCHEMA: list[ColumnSpec] = [
         name="close",
         type="FLOAT64",
         mode="NULLABLE",
-        short_description="Closing price of the bar (unadjusted, raw).",
+        short_description="Closing price (yfinance split-adjusted; not dividend-adjusted).",
         business_definition=(
             "Last traded price during the bar window, in USD, as reported by Yahoo "
-            "Finance without split or dividend adjustment (auto_adjust=False). For the "
-            "1d interval this is the official closing auction price; for intraday "
-            "intervals it is the last transaction price before the bar boundary. "
-            "Use adj_close for return calculations on the 1d table."
+            "Finance. Although fetched with auto_adjust=False, Yahoo ALWAYS divides "
+            "historical prices by later split ratios, so this column is SPLIT-adjusted "
+            "(a split shows a continuous series, not a price jump) but NOT "
+            "dividend-adjusted — it is the split-adjusted price-return series. For the "
+            "actual un-adjusted price that traded on the day, use close_raw in the "
+            "ohlcv_1d_adjusted view; for total return (dividends reinvested) see adj_close."
         ),
-        semantic_tags=["price", "ohlc"],
+        semantic_tags=["price", "ohlc", "split_adjusted"],
         valid_range=(0.0, 1_000_000.0),
         valid_values=None,
         example_value=189.95,
         gotchas=[
-            "Raw close does not account for splits or dividends — do not use for "
-            "multi-year return series without first adjusting. Use adj_close (1d) "
-            "or the pre-adjusted intraday close for adjusted time-series work."
+            "Yahoo re-derives the split adjustment on every NEW split, so this column "
+            "DRIFTS run-to-run for a fixed historical bar. For a reproducible series, "
+            "anchor on close_raw (immutable de-split price) + the stock_splits events "
+            "via the ohlcv_1d_adjusted view, rather than on this column directly."
         ],
         statsapi_equivalent=None,
         yfinance_source_field="Close",
