@@ -110,3 +110,42 @@ def test_fetch_changes_parses_adds_and_removes():
     assert str(row["added_ticker"]) == "FICO"
     assert str(row["removed_ticker"]) == "LUMN"
     assert row["date"] == pd.Timestamp("2023-06-20").date()
+
+
+# The REAL Wikipedia changes table uses a 2-row header where rowspan'd cells
+# (Effective Date, Reason) repeat the label on both levels -> pandas yields
+# ('Effective Date','Effective Date'); the naive level-join produced
+# 'Effective Date Effective Date', and the date column is 'Effective Date', not
+# 'Date'. Regression for the 2026-06-04 live break.
+_CHANGES_HTML_REAL = """
+<table class="wikitable"><tr><th>x</th></tr><tr><td>current-table-placeholder</td></tr></table>
+<table class="wikitable">
+<tr><th rowspan="2">Effective Date</th><th colspan="2">Added</th><th colspan="2">Removed</th><th rowspan="2">Reason</th></tr>
+<tr><th>Ticker</th><th>Security</th><th>Ticker</th><th>Security</th></tr>
+<tr><td>June 20, 2023</td><td>FICO</td><td>Fair Isaac</td><td>LUMN</td><td>Lumen</td><td>Market cap change.</td></tr>
+</table>
+"""
+
+
+def test_fetch_changes_handles_real_rowspan_header():
+    with patch("yfinance_bigquery.universe.client.requests.get") as g:
+        g.return_value.text = _CHANGES_HTML_REAL
+        g.return_value.raise_for_status = lambda: None
+        df = WikipediaUniverseClient().fetch_changes()
+    row = df.iloc[0]
+    assert str(row["added_ticker"]) == "FICO"
+    assert str(row["removed_ticker"]) == "LUMN"
+    assert row["date"] == pd.Timestamp("2023-06-20").date()
+
+
+def test_flatten_columns_dedupes_identical_levels():
+    from yfinance_bigquery.universe.client import _flatten_columns
+
+    cols = pd.MultiIndex.from_tuples([
+        ("Effective Date", "Effective Date"),
+        ("Added", "Ticker"),
+        ("Reason", "Reason"),
+    ])
+    assert _flatten_columns(cols) == ["Effective Date", "Added Ticker", "Reason"]
+    # flat (non-MultiIndex) passes through unchanged
+    assert _flatten_columns(pd.Index(["Date", "Reason"])) == ["Date", "Reason"]
