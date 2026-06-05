@@ -145,6 +145,15 @@ class TestUniverseParser:
         assert ns.action == "list"
         assert ns.dim_symbols == "p.ds.dim_symbols"
 
+    def test_reconstruct_parses(self):
+        parser = build_parser()
+        ns = parser.parse_args([
+            "universe", "reconstruct",
+            "--membership-table", "p.ds.sp500_membership",
+        ])
+        assert ns.action == "reconstruct"
+        assert ns.membership_table == "p.ds.sp500_membership"
+
     def test_unknown_source_rejected(self):
         parser = build_parser()
         with pytest.raises(SystemExit):
@@ -337,6 +346,40 @@ class TestCmdUniverseInit:
         assert rc == 0
         fake_writer.create_table_if_missing.assert_not_called()
         fake_writer.merge.assert_called_once()
+
+
+class TestCmdUniverseReconstruct:
+    def test_reconstruct_happy_path(self):
+        fake_client = MagicMock()
+        fake_mwriter = MagicMock()
+        fake_mwriter.replace.return_value = 510
+        fake_uni_client = MagicMock()
+        fake_uni_client.fetch_constituents.return_value = pd.DataFrame(
+            {"symbol": ["AAPL"], "date_added": [date(1982, 11, 30)]}
+        )
+        fake_uni_client.fetch_changes.return_value = pd.DataFrame(
+            {"date": [date(2023, 6, 20)],
+             "added_ticker": ["FICO"], "removed_ticker": ["LUMN"]}
+        )
+
+        ns = argparse.Namespace(
+            command="universe",
+            action="reconstruct",
+            membership_table="p.ds.sp500_membership",
+        )
+
+        # Deferred imports bind at call time; patch at the source modules.
+        with patch("yfinance_bigquery.cli.bigquery.Client", return_value=fake_client), \
+             patch("yfinance_bigquery.universe.writer.MembershipWriter",
+                   return_value=fake_mwriter), \
+             patch("yfinance_bigquery.universe.client.WikipediaUniverseClient",
+                   return_value=fake_uni_client):
+            rc = cmd_universe(ns)
+
+        assert rc == 0
+        fake_uni_client.fetch_constituents.assert_called_once()
+        fake_uni_client.fetch_changes.assert_called_once()
+        fake_mwriter.replace.assert_called_once()
 
 
 # ===========================================================================

@@ -136,6 +136,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--dim-symbols", required=True,
                         help="project.dataset.dim_symbols")
 
+    p_recon = uni_sub.add_parser(
+        "reconstruct",
+        help="Reconstruct point-in-time membership (sp500_membership) from Wikipedia",
+    )
+    p_recon.add_argument("--membership-table", required=True,
+                         help="project.dataset.sp500_membership")
+
     # ---------------------------------------------------------------------- #
     # verify
     # ---------------------------------------------------------------------- #
@@ -353,7 +360,24 @@ def cmd_sync(ns: argparse.Namespace) -> int:
 
 def cmd_universe(ns: argparse.Namespace) -> int:
     from yfinance_bigquery.universe.client import WikipediaUniverseClient
-    from yfinance_bigquery.universe.writer import DimSymbolsTableRef, DimSymbolsWriter
+    from yfinance_bigquery.universe.writer import (
+        DimSymbolsTableRef,
+        DimSymbolsWriter,
+        MembershipWriter,
+    )
+
+    if ns.action == "reconstruct":
+        from yfinance_bigquery.universe.membership import reconstruct_membership
+
+        client = bigquery.Client()
+        uni_client = WikipediaUniverseClient()
+        constituents = uni_client.fetch_constituents()
+        changes = uni_client.fetch_changes()
+        membership = reconstruct_membership(current=constituents, changes=changes)
+        ref = DimSymbolsTableRef.parse(ns.membership_table)
+        n = MembershipWriter(client=client).replace(ref=ref, membership=membership)
+        log.info("universe reconstruct: wrote %d membership spells to %s", n, ref)
+        return 0
 
     if ns.action == "list":
         client = bigquery.Client()
