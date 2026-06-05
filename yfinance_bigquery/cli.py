@@ -146,6 +146,18 @@ def build_parser() -> argparse.ArgumentParser:
                          help="project.dataset.sp500_membership")
 
     # ---------------------------------------------------------------------- #
+    # views
+    # ---------------------------------------------------------------------- #
+    p_views = sub.add_parser("views", help="Create/replace the adjusted OHLCV views")
+    views_sub = p_views.add_subparsers(dest="action", required=True)
+    p_vc = views_sub.add_parser(
+        "create", help="Create/replace all 5 adjusted views (1d + 4 intraday)"
+    )
+    p_vc.add_argument("--dataset", required=True, help="project.dataset")
+    p_vc.add_argument("--table-prefix", default="ohlcv",
+                      help="OHLCV table name prefix (default: ohlcv)")
+
+    # ---------------------------------------------------------------------- #
     # verify
     # ---------------------------------------------------------------------- #
     p_v = sub.add_parser("verify", help="Run internal consistency checks on OHLCV tables")
@@ -510,6 +522,39 @@ def cmd_verify_membership(ns: argparse.Namespace) -> int:
     return 0 if overall_pass else 1
 
 
+def cmd_views(ns: argparse.Namespace) -> int:
+    """Create/replace all 5 adjusted views: ohlcv_1d_adjusted (self-contained) +
+    the 4 intraday *_adjusted views (which borrow the daily factors). Idempotent
+    DDL, so the daily job can call it after every sync to keep the views matching
+    the deployed library."""
+    from yfinance_bigquery.adjust import (
+        create_adjusted_view,
+        create_intraday_adjusted_view,
+    )
+
+    if len(ns.dataset.split(".")) != 2:
+        log.error("--dataset must be project.dataset, got %r", ns.dataset)
+        return 2
+
+    client = bigquery.Client()
+    daily_table = f"{ns.dataset}.{Interval.D1.table_name(prefix=ns.table_prefix)}"
+    daily_view = f"{daily_table}_adjusted"
+    create_adjusted_view(client=client, source_table=daily_table, view=daily_view)
+    log.info("created view %s", daily_view)
+
+    for iv in (Interval.M60, Interval.M15, Interval.M5, Interval.M1):
+        intraday_table = f"{ns.dataset}.{iv.table_name(prefix=ns.table_prefix)}"
+        view = f"{intraday_table}_adjusted"
+        create_intraday_adjusted_view(
+            client=client,
+            intraday_table=intraday_table,
+            daily_adjusted_view=daily_view,
+            view=view,
+        )
+        log.info("created view %s", view)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # cmd_docs
 # ---------------------------------------------------------------------------
@@ -583,6 +628,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_verify(ns)
     if ns.command == "verify-membership":
         return cmd_verify_membership(ns)
+    if ns.command == "views":
+        return cmd_views(ns)
     if ns.command == "docs":
         return cmd_docs(ns)
     raise AssertionError(f"unhandled command {ns.command!r}")

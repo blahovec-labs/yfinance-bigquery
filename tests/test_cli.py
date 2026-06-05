@@ -655,3 +655,45 @@ class TestCmdDocs:
         assert rc == 0
         captured = capsys.readouterr()
         assert "models:" in captured.out
+
+
+# ===========================================================================
+# views create
+# ===========================================================================
+
+
+class TestViewsParser:
+    def test_create_args(self):
+        parser = build_parser()
+        ns = parser.parse_args(["views", "create", "--dataset", "p.ds"])
+        assert ns.command == "views"
+        assert ns.action == "create"
+        assert ns.dataset == "p.ds"
+        assert ns.table_prefix == "ohlcv"
+
+
+def test_cmd_views_creates_all_five_views():
+    from yfinance_bigquery.cli import cmd_views
+
+    ns = argparse.Namespace(
+        command="views", action="create", dataset="proj.ds", table_prefix="ohlcv"
+    )
+    with patch("yfinance_bigquery.cli.bigquery.Client", return_value=MagicMock()), \
+         patch("yfinance_bigquery.adjust.create_adjusted_view") as m_daily, \
+         patch("yfinance_bigquery.adjust.create_intraday_adjusted_view") as m_intraday:
+        rc = cmd_views(ns)
+
+    assert rc == 0
+    # 1d adjusted view created once, self-contained
+    assert m_daily.call_count == 1
+    assert m_daily.call_args.kwargs["view"] == "proj.ds.ohlcv_1d_adjusted"
+    # 4 intraday adjusted views, all borrowing the daily view's factors
+    assert m_intraday.call_count == 4
+    created = {c.kwargs["view"] for c in m_intraday.call_args_list}
+    assert created == {
+        f"proj.ds.ohlcv_{iv}_adjusted" for iv in ("60m", "15m", "5m", "1m")
+    }
+    assert all(
+        c.kwargs["daily_adjusted_view"] == "proj.ds.ohlcv_1d_adjusted"
+        for c in m_intraday.call_args_list
+    )
