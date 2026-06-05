@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# INTERNAL_AGG_SQL has 6 entries: the user-facing "trading_day_alignment" metric
+# INTERNAL_AGG_SQL has 7 entries: the user-facing "trading_day_alignment" metric
 # is split into two SQL variants by interval (_1d and _intraday).  The external-facing
-# SUPPORTED_METRICS set keeps the single user-visible name (5 entries total).
+# SUPPORTED_METRICS set keeps the single user-visible name (6 entries total).
 INTERNAL_AGG_SQL: Final[dict[str, str]] = {
     "ohlc_monotonic": (
         "WITH violations AS (\n"
@@ -179,7 +179,7 @@ class InternalConsistencyVerifier:
     SQL variant based on ``interval``.
     """
 
-    # External-facing metric names (5).  The SQL dict has 6 entries because
+    # External-facing metric names (6).  The SQL dict has 7 entries because
     # trading_day_alignment splits into _1d / _intraday variants.
     SUPPORTED_METRICS: Final[frozenset[str]] = frozenset([
         "ohlc_monotonic",

@@ -93,8 +93,10 @@ def compute_total_return_factor(bars: pd.DataFrame) -> pd.DataFrame:
     prev_close = out.groupby("symbol")["close"].shift(1)
     div = out["dividends"].fillna(0.0)
     # Per-ex-date reinvestment multiplier: (1 - div/prev_close) on ex-dates, else 1.
+    # Require div < prev_close (keeps the multiplier in (0, 1)); a dividend >= the
+    # whole share price is pathological and is left unadjusted, mirroring the SQL.
     per_bar = pd.Series(1.0, index=out.index, dtype=float)
-    mask = (div > 0) & (prev_close > 0)
+    mask = (div > 0) & (prev_close > 0) & (div < prev_close)
     per_bar.loc[mask] = 1.0 - div.loc[mask] / prev_close.loc[mask]
 
     out["cum_div_factor"] = per_bar.groupby(out["symbol"]).transform(_future_product)
@@ -144,7 +146,10 @@ def build_adjustment_factor_sql(*, source_table: str) -> str:
         "mult AS (\n"
         "  SELECT\n"
         "    symbol, trading_date, open, high, low, close, volume, _sm,\n"
-        "    IF(dividends > 0 AND _prev_close > 0,\n"
+        # Require dividends < prev_close so _dm stays in (0, 1): a dividend >= the
+        # whole share price (a pathological special/liquidating distribution) can't
+        # be sensibly reinvestment-adjusted, and would make LN(_dm) hit a <=0 input.
+        "    IF(dividends > 0 AND _prev_close > 0 AND dividends < _prev_close,\n"
         "       1.0 - dividends / _prev_close, 1.0) AS _dm\n"
         "  FROM base\n"
         "),\n"
