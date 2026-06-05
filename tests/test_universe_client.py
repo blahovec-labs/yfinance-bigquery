@@ -86,3 +86,27 @@ def test_fetch_constituents_sends_user_agent_header():
     called_headers = mock_get.call_args.kwargs.get("headers", {})
     assert "User-Agent" in called_headers
     assert "yfinance-bigquery" in called_headers["User-Agent"]
+
+
+# ---------------------------------------------------------------------------
+# fetch_changes tests
+# ---------------------------------------------------------------------------
+
+_CHANGES_HTML = """
+<table class="wikitable"><tr><th>x</th></tr><tr><td>current-table-placeholder</td></tr></table>
+<table class="wikitable">
+<tr><th>Date</th><th>Added Ticker</th><th>Added Security</th><th>Removed Ticker</th><th>Removed Security</th><th>Reason</th></tr>
+<tr><td>June 20, 2023</td><td>FICO</td><td>Fair Isaac</td><td>LUMN</td><td>Lumen</td><td>Market cap change.</td></tr>
+</table>
+"""
+
+
+def test_fetch_changes_parses_adds_and_removes():
+    with patch("yfinance_bigquery.universe.client.requests.get") as g:
+        g.return_value.text = _CHANGES_HTML
+        g.return_value.raise_for_status = lambda: None
+        df = WikipediaUniverseClient().fetch_changes()
+    row = df.iloc[0]
+    assert str(row["added_ticker"]) == "FICO"
+    assert str(row["removed_ticker"]) == "LUMN"
+    assert row["date"] == pd.Timestamp("2023-06-20").date()
