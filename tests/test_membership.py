@@ -61,3 +61,14 @@ def test_members_as_of_sql_has_pit_predicate():
     assert "date_added <= @as_of" in sql
     assert "date_removed IS NULL OR date_removed > @as_of" in sql
     assert "p.d.sp500_membership" in sql
+
+
+def test_membership_schema_columns():
+    from yfinance_bigquery.schema import SP500_MEMBERSHIP_SCHEMA
+
+    cols = {c.name: c for c in SP500_MEMBERSHIP_SCHEMA}
+    assert set(cols) == {"symbol", "date_added", "date_removed", "source"}
+    assert cols["symbol"].mode == "REQUIRED"
+    assert cols["source"].mode == "REQUIRED"
+    assert cols["date_added"].mode == "NULLABLE"
+    assert cols["date_removed"].mode == "NULLABLE"

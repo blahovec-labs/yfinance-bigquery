@@ -630,3 +630,109 @@ DIM_SYMBOLS_SCHEMA: list[ColumnSpec] = [
         deprecated_in_year=None,
     ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# SP500_MEMBERSHIP_SCHEMA — point-in-time membership spells (survivorship-free)
+# ---------------------------------------------------------------------------
+
+SP500_MEMBERSHIP_SCHEMA: list[ColumnSpec] = [
+    ColumnSpec(
+        name="symbol",
+        type="STRING",
+        mode="REQUIRED",
+        short_description="Ticker symbol of an S&P 500 member during this spell.",
+        business_definition=(
+            "Yahoo Finance ticker symbol that was an S&P 500 constituent for the "
+            "[date_added, date_removed) interval described by this row. Unlike "
+            "dim_symbols, a symbol may appear in MULTIPLE rows here (one per "
+            "membership spell), so this column is NOT a primary key — join on "
+            "(symbol, date) windows, not on symbol alone."
+        ),
+        semantic_tags=["identifier", "join_key"],
+        valid_range=None,
+        valid_values=None,
+        example_value="LUMN",
+        gotchas=[
+            "Not unique: re-additions and historically-removed symbols produce "
+            "multiple rows. Use the point-in-time predicate "
+            "(date_added <= D AND (date_removed IS NULL OR date_removed > D)).",
+        ],
+        statsapi_equivalent=None,
+        yfinance_source_field=None,
+        deprecated_in_year=None,
+    ),
+    ColumnSpec(
+        name="date_added",
+        type="DATE",
+        mode="NULLABLE",
+        short_description="Date this membership spell began.",
+        business_definition=(
+            "Calendar date the symbol entered the S&P 500 for this spell. Sourced "
+            "from Wikipedia's current-constituents 'Date added' column or, for "
+            "since-removed symbols, the matching addition in Wikipedia's dated "
+            "changes log. NULL when the addition predates the reconstruction window "
+            "(~2019) — treat such spells as 'member since at least the window start'."
+        ),
+        semantic_tags=["temporal", "universe_management"],
+        valid_range=None,
+        valid_values=None,
+        example_value="2020-01-01",
+        gotchas=[
+            "NULL does NOT mean 'never added' — it means the addition is older than "
+            "the reconstructed changes window. Do not run backtests before the "
+            "documented window-start date.",
+        ],
+        statsapi_equivalent=None,
+        yfinance_source_field=None,
+        deprecated_in_year=None,
+    ),
+    ColumnSpec(
+        name="date_removed",
+        type="DATE",
+        mode="NULLABLE",
+        short_description="Date this spell ended. NULL = still a member.",
+        business_definition=(
+            "Calendar date the symbol left the S&P 500 for this spell, from "
+            "Wikipedia's dated changes log. NULL marks an OPEN spell (a current "
+            "constituent). Recovering since-removed symbols as closed spells is the "
+            "survivorship-bias fix: a universe built from current members alone "
+            "silently excludes everything that has since left the index."
+        ),
+        semantic_tags=["temporal", "universe_management"],
+        valid_range=None,
+        valid_values=None,
+        example_value="2023-06-20",
+        gotchas=[
+            "The point-in-time predicate uses a half-open interval: a symbol is a "
+            "member on date D iff date_added <= D AND (date_removed IS NULL OR "
+            "date_removed > D). The removal date itself is the first non-member day.",
+        ],
+        statsapi_equivalent=None,
+        yfinance_source_field=None,
+        deprecated_in_year=None,
+    ),
+    ColumnSpec(
+        name="source",
+        type="STRING",
+        mode="REQUIRED",
+        short_description="Provenance of this membership spell.",
+        business_definition=(
+            "Identifies how this spell was derived. Currently always 'wikipedia' "
+            "(reconstructed from the Wikipedia constituent list + dated changes "
+            "table). Reserved for future provenance values if a second source is "
+            "added for cross-validation."
+        ),
+        semantic_tags=["audit", "provenance"],
+        valid_range=None,
+        valid_values=["wikipedia"],
+        example_value="wikipedia",
+        gotchas=[
+            "Reconstruction reliability degrades before the changes-table window "
+            "(~2019); see the table description for the documented confidence bound.",
+        ],
+        statsapi_equivalent=None,
+        yfinance_source_field=None,
+        deprecated_in_year=None,
+    ),
+]
