@@ -88,3 +88,90 @@ def test_fetch_empty_batch_returns_empty_df():
             ["BADTICKER"], Interval.D1, "2024-01-02", "2024-01-10",
         )
     assert long_df.empty
+
+
+# ---------------------------------------------------------------------------
+# Corporate-action capture (actions=True)
+# ---------------------------------------------------------------------------
+# yfinance.download() only returns the Dividends + Stock Splits columns when
+# actions=True is passed. Without it, those columns come back absent and land
+# in BigQuery as all-NULL — leaving the data layer blind to splits/dividends
+# (the gap that broke the A2 corporate-action work). These tests pin the fix.
+
+
+def _ohlcv_with_actions() -> pd.DataFrame:
+    """Synthetic group_by='ticker' MultiIndex frame WITH Dividends + Stock Splits.
+
+    Mirrors what ``yfinance.download(..., actions=True, group_by='ticker')``
+    returns for a 1d request: columns are a [ticker, field] MultiIndex and the
+    field set includes 'Dividends' and 'Stock Splits'. AAPL gets a 4:1 split on
+    2024-01-03 and a $0.24 dividend on 2024-01-04; MSFT has neither.
+    """
+    idx = pd.DatetimeIndex(
+        pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]), name="Date"
+    )
+    fields = ["Open", "High", "Low", "Close", "Adj Close", "Volume",
+              "Dividends", "Stock Splits"]
+    cols = pd.MultiIndex.from_product(
+        [["AAPL", "MSFT"], fields], names=["Ticker", "Price"]
+    )
+    data = {
+        ("AAPL", "Open"): [185.0, 184.0, 46.0],
+        ("AAPL", "High"): [186.0, 185.0, 47.0],
+        ("AAPL", "Low"): [183.0, 183.0, 45.0],
+        ("AAPL", "Close"): [184.0, 46.0, 46.5],
+        ("AAPL", "Adj Close"): [183.9, 45.9, 46.4],
+        ("AAPL", "Volume"): [50_000_000, 60_000_000, 55_000_000],
+        ("AAPL", "Dividends"): [0.0, 0.0, 0.24],
+        ("AAPL", "Stock Splits"): [0.0, 4.0, 0.0],
+        ("MSFT", "Open"): [370.0, 371.0, 372.0],
+        ("MSFT", "High"): [372.0, 373.0, 374.0],
+        ("MSFT", "Low"): [369.0, 370.0, 371.0],
+        ("MSFT", "Close"): [371.0, 372.0, 373.0],
+        ("MSFT", "Adj Close"): [370.9, 371.9, 372.9],
+        ("MSFT", "Volume"): [20_000_000, 21_000_000, 22_000_000],
+        ("MSFT", "Dividends"): [0.0, 0.0, 0.0],
+        ("MSFT", "Stock Splits"): [0.0, 0.0, 0.0],
+    }
+    return pd.DataFrame(data, index=idx, columns=cols)
+
+
+def test_fetch_requests_corporate_actions():
+    """fetch() must call yfinance.download with actions=True, or splits and
+    dividends never come back from Yahoo (they land as all-NULL in BQ)."""
+    with patch(
+        "yfinance_bigquery.client.yfinance.download",
+        return_value=_ohlcv_with_actions(),
+    ) as mock_dl:
+        YFinanceClient(sleep_seconds=0.0).fetch(
+            ["AAPL", "MSFT"], Interval.D1, "2024-01-02", "2024-01-05",
+        )
+    assert mock_dl.call_count == 1
+    assert mock_dl.call_args.kwargs.get("actions") is True
+
+
+def test_fetch_carries_split_and_dividend_events():
+    """When yfinance returns Stock Splits / Dividends, they survive the reshape
+    onto the right (symbol, trading_date) rows — not dropped to NULL."""
+    with patch(
+        "yfinance_bigquery.client.yfinance.download",
+        return_value=_ohlcv_with_actions(),
+    ):
+        long_df = YFinanceClient(sleep_seconds=0.0).fetch(
+            ["AAPL", "MSFT"], Interval.D1, "2024-01-02", "2024-01-05",
+        )
+
+    def cell(symbol: str, day: str, col: str) -> float:
+        row = long_df[
+            (long_df["symbol"] == symbol)
+            & (long_df["trading_date"] == pd.to_datetime(day).date())
+        ]
+        assert len(row) == 1, f"expected exactly one {symbol} {day} row"
+        return float(row.iloc[0][col])
+
+    # AAPL's 4:1 split on 2024-01-03 and $0.24 dividend on 2024-01-04 survive.
+    assert cell("AAPL", "2024-01-03", "stock_splits") == 4.0
+    assert cell("AAPL", "2024-01-04", "dividends") == 0.24
+    # Non-event cells are 0.0, not NULL.
+    assert cell("AAPL", "2024-01-02", "stock_splits") == 0.0
+    assert cell("MSFT", "2024-01-03", "stock_splits") == 0.0

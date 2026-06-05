@@ -98,6 +98,7 @@ class YFinanceClient:
                     start=start,
                     end=end,
                     auto_adjust=False,
+                    actions=True,  # return Dividends + Stock Splits columns (1d)
                     group_by="ticker",
                     threads=True,
                     progress=False,
@@ -210,9 +211,9 @@ class YFinanceClient:
         # ------------------------------------------------------------------ #
         # 6. Ensure all 14 OHLCV_SCHEMA columns exist                        #
         # ------------------------------------------------------------------ #
-        # yfinance.download() does not return Dividends or Stock Splits.
-        # Adj Close is only present for 1d (already in the DataFrame if
-        # the fixture/download included it).  Fill missing columns with None.
+        # With actions=True, the 1d download returns Dividends + Stock Splits
+        # (and Adj Close); they flow through the stack above. Intraday intervals
+        # omit them, so any column still absent here is back-filled with None.
         for col in ("adj_close", "dividends", "stock_splits"):
             if col not in long.columns:
                 long[col] = None
