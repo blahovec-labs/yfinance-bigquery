@@ -129,34 +129,61 @@ def test_write_empty_df_returns_zero():
     assert client.load_table_from_dataframe.call_count == 0
 
 
-def test_write_runs_delete_then_load():
+# Writes must never leave a window deleted but not replaced. write() used to run the
+# DELETE as its own query and then a separate load job; a load job can't join a
+# transaction, so a failed load left those symbols' bars for the window gone (the
+# failure that wiped 2026-06-02 from statcast-bigquery). Contract now: load into a
+# staging table FIRST, then DELETE + INSERT ... SELECT in ONE transaction.
+
+
+def _swaps(client: MagicMock) -> list[str]:
+    return [c.args[0] for c in client.query_and_wait.call_args_list if "DELETE" in c.args[0]]
+
+
+def test_write_failed_load_deletes_nothing():
     client = make_mock_client()
-    # load_table_from_dataframe returns a job with a .result() method
-    load_job = MagicMock()
-    client.load_table_from_dataframe.return_value = load_job
-
+    client.load_table_from_dataframe.return_value.result.side_effect = RuntimeError("400")
     writer = OHLCVWriter(client=client, interval=Interval.D1)
-    df = _make_ohlcv_df(["AAPL"])
-    ref = OHLCVTableRef.parse("p.d.ohlcv_1d")
 
-    n = writer.write(ref, df, "2024-04-01", "2024-04-01")
+    with pytest.raises(RuntimeError):
+        writer.write(OHLCVTableRef.parse("p.d.ohlcv_1d"), _make_ohlcv_df(["AAPL"]),
+                     "2024-04-01", "2024-04-01")
+
+    assert _swaps(client) == []
+
+
+def test_write_loads_to_staging_then_swaps_in_one_transaction():
+    client = make_mock_client()
+    writer = OHLCVWriter(client=client, interval=Interval.D1)
+
+    n = writer.write(OHLCVTableRef.parse("p.d.ohlcv_1d"), _make_ohlcv_df(["AAPL"]),
+                     "2024-04-01", "2024-04-01")
 
     assert n == 1
-    # DELETE via query_and_wait
-    assert client.query_and_wait.call_count == 1
-    delete_sql = client.query_and_wait.call_args.args[0]
-    assert "DELETE" in delete_sql
-    assert "BETWEEN" in delete_sql
-    assert "UNNEST" in delete_sql
-    # INSERT via load_table_from_dataframe
-    assert client.load_table_from_dataframe.call_count == 1
-    load_job.result.assert_called_once()
+    staging = str(client.load_table_from_dataframe.call_args.args[1])
+    assert staging != "p.d.ohlcv_1d" and "_staging_" in staging
+    swaps = _swaps(client)
+    assert len(swaps) == 1
+    sql = swaps[0]
+    assert sql.lstrip().startswith("BEGIN TRANSACTION")
+    assert sql.rstrip().endswith("COMMIT TRANSACTION;")
+    assert ("DELETE FROM `p.d.ohlcv_1d` WHERE trading_date BETWEEN @start AND @end "
+            "AND symbol IN UNNEST(@symbols)") in sql
+    assert sql.index("DELETE") < sql.index("INSERT INTO `p.d.ohlcv_1d`")
+    assert f"FROM `{staging}`" in sql
 
-    # Verify order: DELETE (query_and_wait) must appear before INSERT (load_table_from_dataframe)
-    method_names = [str(c) for c in client.method_calls]
-    delete_idx = next(i for i, n in enumerate(method_names) if "query_and_wait" in n)
-    load_idx = next(i for i, n in enumerate(method_names) if "load_table_from_dataframe" in n)
-    assert delete_idx < load_idx
+
+def test_write_drops_staging_even_when_swap_fails():
+    client = make_mock_client()
+    client.query_and_wait.side_effect = RuntimeError("transaction aborted")
+    writer = OHLCVWriter(client=client, interval=Interval.D1)
+
+    with pytest.raises(RuntimeError):
+        writer.write(OHLCVTableRef.parse("p.d.ohlcv_1d"), _make_ohlcv_df(["AAPL"]),
+                     "2024-04-01", "2024-04-01")
+
+    staging = str(client.load_table_from_dataframe.call_args.args[1])
+    assert staging in [str(c.args[0]) for c in client.delete_table.call_args_list]
 
 
 def test_write_delete_scoped_to_unique_symbols():

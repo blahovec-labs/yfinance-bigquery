@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1] - 2026-11-21
+
+### Fixed
+- OHLCV writes are now atomic. `OHLCVWriter.write` ran `DELETE ... WHERE trading_date
+  BETWEEN @start AND @end AND symbol IN UNNEST(@symbols)` as its own query and then a
+  separate load job. A load job can't join a transaction, so a failed load left those
+  symbols' bars for the window deleted until the next good run (the failure that wiped
+  2026-06-02 from statcast-bigquery). It now loads into a short-lived `_staging_*` table
+  (6-hour expiry backstop), then `DELETE` + `INSERT ... SELECT` in one multi-statement
+  transaction, then drops the staging table. A failed load deletes nothing; a failed swap
+  rolls back. Idempotency, the symbol scoping and the empty-frame no-op are unchanged.
+  The membership `replace` (a single `WRITE_TRUNCATE` load) and `dim_symbols` `MERGE`
+  were already atomic.
+
 ## [0.2.0] - 2026-06-05
 
 Bulletproof corporate-action layer + survivorship-free universe + cross-timeframe
