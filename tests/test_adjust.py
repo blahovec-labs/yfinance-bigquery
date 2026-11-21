@@ -18,7 +18,7 @@ from yfinance_bigquery.adjust import compute_split_factor, compute_total_return_
 
 
 def _bars(rows: list[tuple[str, date, float, float]]) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=["symbol", "trading_date", "close", "stock_splits"])
+    return pd.DataFrame(rows, columns=pd.Index(["symbol", "trading_date", "close", "stock_splits"]))
 
 
 def test_close_raw_recovers_actual_pre_split_price():
@@ -116,7 +116,7 @@ def test_reverse_split_recovers_lower_raw_price():
 
 
 def _div_bars(rows: list[tuple[str, date, float, float]]) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=["symbol", "trading_date", "close", "dividends"])
+    return pd.DataFrame(rows, columns=pd.Index(["symbol", "trading_date", "close", "dividends"]))
 
 
 def test_dividend_total_return_factor():

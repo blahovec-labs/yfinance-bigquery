@@ -81,11 +81,12 @@ class WikipediaUniverseClient:
                 f"got {list(df.columns)}. The page structure may have changed."
             )
 
-        out: pd.DataFrame = df[list(resolved)].rename(columns=resolved).copy()
+        out: pd.DataFrame = df.loc[:, list(resolved)].rename(columns=resolved).copy()
         out["date"] = out["date"].apply(_parse_date)
-        return out[
+        return out.loc[
+            :,
             ["date", "added_ticker", "added_security",
-             "removed_ticker", "removed_security", "reason"]
+             "removed_ticker", "removed_security", "reason"],
         ]
 
     def fetch_constituents(self) -> pd.DataFrame:

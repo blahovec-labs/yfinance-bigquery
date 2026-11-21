@@ -60,7 +60,7 @@ def reconstruct_membership(
     for row in current.itertuples(index=False):
         rows.append(
             {
-                "symbol": str(row.symbol),
+                "symbol": str(getattr(row, "symbol")),
                 "date_added": getattr(row, "date_added", None),
                 "date_removed": None,
                 "source": _SOURCE,
@@ -87,7 +87,7 @@ def reconstruct_membership(
         )
         recovered.add(sym)
 
-    return pd.DataFrame(rows, columns=_COLUMNS)
+    return pd.DataFrame(rows, columns=pd.Index(_COLUMNS))
 
 
 def members_as_of_sql(*, table: str) -> str:

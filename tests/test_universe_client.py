@@ -95,8 +95,18 @@ def test_fetch_constituents_sends_user_agent_header():
 _CHANGES_HTML = """
 <table class="wikitable"><tr><th>x</th></tr><tr><td>current-table-placeholder</td></tr></table>
 <table class="wikitable">
-<tr><th>Date</th><th>Added Ticker</th><th>Added Security</th><th>Removed Ticker</th><th>Removed Security</th><th>Reason</th></tr>
-<tr><td>June 20, 2023</td><td>FICO</td><td>Fair Isaac</td><td>LUMN</td><td>Lumen</td><td>Market cap change.</td></tr>
+<tr><th>Date</th>
+<th>Added Ticker</th>
+<th>Added Security</th>
+<th>Removed Ticker</th>
+<th>Removed Security</th>
+<th>Reason</th></tr>
+<tr><td>June 20, 2023</td>
+<td>FICO</td>
+<td>Fair Isaac</td>
+<td>LUMN</td>
+<td>Lumen</td>
+<td>Market cap change.</td></tr>
 </table>
 """
 
@@ -120,9 +130,17 @@ def test_fetch_changes_parses_adds_and_removes():
 _CHANGES_HTML_REAL = """
 <table class="wikitable"><tr><th>x</th></tr><tr><td>current-table-placeholder</td></tr></table>
 <table class="wikitable">
-<tr><th rowspan="2">Effective Date</th><th colspan="2">Added</th><th colspan="2">Removed</th><th rowspan="2">Reason</th></tr>
+<tr><th rowspan="2">Effective Date</th>
+<th colspan="2">Added</th>
+<th colspan="2">Removed</th>
+<th rowspan="2">Reason</th></tr>
 <tr><th>Ticker</th><th>Security</th><th>Ticker</th><th>Security</th></tr>
-<tr><td>June 20, 2023</td><td>FICO</td><td>Fair Isaac</td><td>LUMN</td><td>Lumen</td><td>Market cap change.</td></tr>
+<tr><td>June 20, 2023</td>
+<td>FICO</td>
+<td>Fair Isaac</td>
+<td>LUMN</td>
+<td>Lumen</td>
+<td>Market cap change.</td></tr>
 </table>
 """
 

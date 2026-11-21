@@ -111,7 +111,7 @@ def _future_product(multipliers: pd.Series) -> pd.Series:
     excludes the current bar's own event (its split/dividend is already reflected
     in that bar's price — Yahoo pre-splits the close, and an ex-date trades ex).
     """
-    including_current = multipliers[::-1].cumprod()[::-1]
+    including_current = multipliers.iloc[::-1].cumprod().iloc[::-1]
     return including_current.shift(-1).fillna(1.0)
 
 
